@@ -1,284 +1,154 @@
 const Discord = require('discord.js');
-const { prefix, token } = require('./config.json');
-const config = require('./config.json');
 const client = new Discord.Client();
-const mongoose = require("mongoose")
-var listausera = [];
-postoji = 1;
-var komentar = "";
+const mongoose = require("mongoose");
+const dotenv = require('dotenv');
+dotenv.config();
 
-//povezi se na bazu
-mongoose.connect(config.mongoPass, {
+const userList = [];
+let comment = "";
+let exists = 1;
+
+const prefix = process.env.prefix; // Bot command prefix
+const token = process.env.token; // Discord bot token
+const mongoPass = process.env.mongoPass;
+
+// Connect to MongoDB
+mongoose.connect(mongoPass, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 });
 
-//modeli
-
+// Models
 const Data = require("./models/data.js");
 
-async function f1() {
-    var x = await Data.find({ postoji: 1 }).exec();
-    for (i = 0; i < x.length; i++) {
-
-        if (listausera.includes(x[i].userID) == false) {
-            listausera.push(x[i].userID);
+// Fetch and populate user list
+async function populateUserList() {
+    const data = await Data.find({ postoji: 1 }).exec();
+    for (const user of data) {
+        if (!userList.includes(user.userID)) {
+            userList.push(user.userID);
         }
     }
-    console.log(listausera);
+    console.log(userList);
 }
 
+// Bot is ready
 client.once('ready', () => {
-    console.log('Ready!');
-
+    console.log('Bot is ready!');
 });
 
-//verifikacija
-
-
-
-
-
-client.on('message', message => {
-
-    f1();
-
+// Handle commands
+client.on('message', (message) => {
+    populateUserList();
 
     if (!message.content.startsWith(prefix) || message.author.bot) return;
 
     const args = message.content.slice(prefix.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
-    const user = message.mentions.users.first();
-    const embed = new Discord.MessageEmbed()
-    const p = new Discord.MessageEmbed()
-    const n = new Discord.MessageEmbed()
+    const mentionedUser = message.mentions.users.first();
+    const helpEmbed = new Discord.MessageEmbed();
+    const positiveVouchEmbed = new Discord.MessageEmbed();
+    const negativeVouchEmbed = new Discord.MessageEmbed();
 
     if (command === 'help') {
-        const help = new Discord.MessageEmbed()
-        help.setTitle("Hello " + message.author.username + ", these are my commands ")
-        help.setThumbnail("https://cdn.discordapp.com/attachments/692865174583115776/761149853366484992/VB1.png")
-        help.setDescription("> `+profile @someone` or `+profile @<id>` \n\n Sees `@someone` / `@<id>`'s profile. \n This includes seeing their DiscordTag, User ID, Avatar, number of positive/negative vouches and the last 5 comments they received. \n\n > `+p @someone <comment>` or `+n @someone <comment>` \n\n  Leaves `@someone` a positive or a negative vouch and a `<comment>`. \n Although non-mandatory, leaving a `<comment>` is encouraged.")
-        help.setColor("#2f9ffa")
-        message.channel.send(help)
+        helpEmbed
+            .setTitle(`Hello ${message.author.username}, these are my commands`)
+            .setThumbnail("https://cdn.discordapp.com/attachments/692865174583115776/761149853366484992/VB1.png")
+            .setDescription("> `+profile @someone` or `+profile @<id>` \n\n View a profile including DiscordTag, User ID, Avatar, number of positive/negative vouches, and the last 5 comments.\n\n > `+p @someone <comment>` or `+n @someone <comment>` \n\n Leave a positive/negative vouch with an optional comment.")
+            .setColor("#2f9ffa");
+        message.channel.send(helpEmbed);
     }
 
-    if (message.content.length == 2) { return; }
-
-    if (command === 'p' && args[0][0] + args[0][1] != "<@") { return; }
-
-    else if (command === 'p' && user.id == message.author.id) {
-        const kk = new Discord.MessageEmbed()
-        kk.setThumbnail("https://cdn.discordapp.com/attachments/692865174583115776/761149853366484992/VB1.png")
-        kk.setDescription("You can't vouch for yourself.")
-        kk.setTitle("Vouch bot")
-        kk.setColor("#2f9ffa")
-        message.channel.send(kk)
-    }
-
-    else if (command === 'p' && listausera.includes(user.id) == false) {
-
-
-        var x = message.content.slice(prefix.length + 3).trim();
-        for (i = 1; i < args.length; i++) {
-            komentar += args[i] + " "
-
+    if (command === 'p' || command === 'n') {
+        if (!mentionedUser || mentionedUser.id === message.author.id) {
+            const selfVouchEmbed = new Discord.MessageEmbed()
+                .setTitle("Vouch Bot")
+                .setDescription("You can't vouch for yourself.")
+                .setColor("#2f9ffa")
+                .setThumbnail("https://cdn.discordapp.com/attachments/692865174583115776/761149853366484992/VB1.png");
+            message.channel.send(selfVouchEmbed);
+            return;
         }
 
-        Data.findOne({
-            userID: user.id
-        }, (err, data) => {
-            if (err) console.log(err);
-            if (!data) {
-                const newData = new Data({
-                    name: client.users.cache.get(user.id).username,
-                    userID: user.id,
-                    pozitivni_vouch: 1,
-                    negativni_vouch: 0,
-                    postoji: postoji,
-                    komentari: komentar + ":white_check_mark:",
-                    verifikacija: ":x:",
+        const isPositive = command === 'p';
+        const vouchSymbol = isPositive ? ":white_check_mark:" : ":x:";
+        const vouchType = isPositive ? "Positive" : "Negative";
 
+        const commentText = args.slice(1).join(" ");
+        comment = commentText;
 
+        if (!userList.includes(mentionedUser.id)) {
+            const newUser = new Data({
+                name: client.users.cache.get(mentionedUser.id).username,
+                userID: mentionedUser.id,
+                pozitivni_vouch: isPositive ? 1 : 0,
+                negativni_vouch: isPositive ? 0 : 1,
+                postoji: exists,
+                komentari: comment + vouchSymbol,
+                verifikacija: ":x:",
+            });
+
+            newUser.save().catch((err) => console.log(err));
+
+            positiveVouchEmbed
+                .setTitle("Vouch Bot")
+                .setDescription(`You have successfully left a ${vouchType.toLowerCase()} vouch for <@${mentionedUser.id}>.\n\n**To view their profile, type:** \n\`+profile <@${mentionedUser.id}>\``)
+                .setColor("#2f9ffa")
+                .setThumbnail(mentionedUser.displayAvatarURL({ dynamic: true }));
+            message.channel.send(positiveVouchEmbed);
+        } else {
+            const updateField = isPositive ? "pozitivni_vouch" : "negativni_vouch";
+            const updateComment = { $push: { komentari: comment + vouchSymbol } };
+
+            Data.findOneAndUpdate({ userID: mentionedUser.id }, { $inc: { [updateField]: 1 }, ...updateComment }, { new: true })
+                .then(() => {
+                    positiveVouchEmbed
+                        .setTitle("Vouch Bot")
+                        .setDescription(`You have successfully left a ${vouchType.toLowerCase()} vouch for <@${mentionedUser.id}>.\n\n**To view their profile, type:** \n\`+profile <@${mentionedUser.id}>\``)
+                        .setColor("#2f9ffa")
+                        .setThumbnail(mentionedUser.displayAvatarURL({ dynamic: true }));
+                    message.channel.send(positiveVouchEmbed);
                 })
-                newData.save().catch(err => console.log(err));
-                p.setTitle("Vouch bot")
-                p.setColor("#2f9ffa")
-                p.setThumbnail(user.displayAvatarURL({ dynamic: true }))
-                p.setDescription("You have successfully left a positive vouch for " + "<@" + user.id + "> \n\n **To see " + user.username + "'s profile, type: **\n `+profile <@" + user.id + "> `")
-                message.channel.send(p)
-
-            }
-            komentar = "";
-
-        })
-
-    }
-    else if ((command === 'p' && listausera.includes(user.id) == true)) {
-        var x = message.content.slice(prefix.length + 3).trim();
-        for (i = 1; i < args.length; i++) {
-            komentar += args[i] + " "
-
-        }
-        async function lal() {
-            await Data.findOneAndUpdate({ userID: user.id }, { $inc: { pozitivni_vouch: 1 } })
-            await Data.findOneAndUpdate({ userID: user.id }, { $push: { komentari: komentar + ":white_check_mark:" } })
-            p.setTitle("Vouch bot")
-            p.setColor("#2f9ffa")
-            p.setThumbnail(user.displayAvatarURL({ dynamic: true }))
-            p.setDescription("You have successfully left a positive vouch for " + "<@" + user.id + "> \n\n **To see " + user.username + "'s profile, type: **\n `+profile <@" + user.id + "> `")
-
-            message.channel.send(p)
-
-            komentar = "";
-        }
-        lal();
-
-
-    }
-    if (command === 'n' && args[0][0] + args[0][1] != "<@") {
-        return;
-    }
-
-    else if (command === 'n' && listausera.includes(user.id) == false) {
-
-        var x = message.content.slice(prefix.length + 3).trim();
-        for (i = 1; i < args.length; i++) {
-            komentar += args[i] + " "
+                .catch((err) => console.log(err));
         }
 
-        Data.findOne({
-            userID: user.id
-        }, (err, data) => {
-            if (err) console.log(err);
-            if (!data) {
-                const newData = new Data({
-                    name: client.users.cache.get(user.id).username,
-                    userID: user.id,
-                    pozitivni_vouch: 0,
-                    negativni_vouch: 1,
-                    postoji: postoji,
-                    komentari: komentar + ":x:",
-                    verifikacija: ":x:",
-
-                })
-                newData.save().catch(err => console.log(err));
-                n.setTitle("Vouch bot")
-                n.setColor("#2f9ffa")
-                n.setThumbnail(user.displayAvatarURL({ dynamic: true }))
-                n.setDescription("You have successfully left a negative vouch for " + "<@" + user.id + "> \n\n **To see " + user.username + "'s profile, type: **\n  `+profile <@" + user.id + "> `")
-                message.channel.send(n)
-
-            }
-            komentar = "";
-        })
+        comment = "";
     }
-    else if (command === 'n' && listausera.includes(user.id) == true) {
-        var x = message.content.slice(prefix.length + 3).trim();
-        for (i = 1; i < args.length; i++) {
-            komentar += args[i] + " "
+
+    if (command === "profile") {
+        if (!mentionedUser) return;
+
+        if (!userList.includes(mentionedUser.id)) {
+            const noInfoEmbed = new Discord.MessageEmbed()
+                .setTitle(`${mentionedUser.username}'s Profile`)
+                .setThumbnail(mentionedUser.displayAvatarURL({ dynamic: true }))
+                .setDescription(`**Discord Tag:** <@${mentionedUser.id}>\n**User ID:** \`${mentionedUser.id}\`\n\n**No information available for this user.**`)
+                .setColor("#2f9ffa");
+            message.channel.send(noInfoEmbed);
+            return;
         }
 
-        async function lol() {
-            await Data.findOneAndUpdate({ userID: user.id }, { $inc: { negativni_vouch: 1 } })
-            await Data.findOneAndUpdate({ userID: user.id }, { $push: { komentari: komentar + ":x:" } })
-            n.setTitle("Vouch bot")
-            n.setColor("#2f9ffa")
-            n.setThumbnail(user.displayAvatarURL({ dynamic: true }))
-            n.setDescription("You have successfully left a negative vouch for " + "<@" + user.id + "> \n\n **To see " + user.username + "'s profile, type: **\n `+profile <@" + user.id + "> `")
+        Data.findOne({ userID: mentionedUser.id })
+            .then((data) => {
+                const lastComments = data.komentari.slice(-5);
+                const profileEmbed = new Discord.MessageEmbed()
+                    .setTitle(`${mentionedUser.username}'s Profile`)
+                    .setDescription(`**Discord Tag:** <@${mentionedUser.id}>\n**User ID:** ${mentionedUser.id}\n**Verified:** ${data.verifikacija}`)
+                    .addField("__**Vouch Information**__", `**Positive:** \`${data.pozitivni_vouch}\`\n**Negative:** \`${data.negativni_vouch}\`\n**Total:** \`${data.pozitivni_vouch + data.negativni_vouch}\``)
+                    .setThumbnail(mentionedUser.displayAvatarURL({ dynamic: true }))
+                    .setImage(data.baner)
+                    .setColor("#2f9ffa");
 
-            message.channel.send(n)
-            komentar = ""
-        }
-        lol();
-    }
-
-    if (command === "banner" && args.length == 1) {
-
-        async function baner() {
-
-            await Data.updateOne(
-                {userID: message.author.id}, 
-                {baner: args[0] },
-
-            )}
-        baner();
-
-        const embed = new Discord.MessageEmbed()
-        embed.setTitle("Vouch bot")
-        embed.setColor("#2f9ffa")
-        embed.setThumbnail("https://cdn.discordapp.com/attachments/692865174583115776/761149853366484992/VB1.png")
-        embed.setDescription("You have successfully placed banner for your profile. If it isn't showing , your link wasn't good.")
-        message.channel.send(embed)
-    }
-    if(command === "removebanner")
-    {
-        
-        async function rb(){
-        await Data.updateOne({userID:message.author.id},{$unset: {baner:" "} })
-        }
-        rb()
-
-        const embed = new Discord.MessageEmbed()
-        embed.setTitle("Vouch bot")
-        embed.setColor("#2f9ffa")
-        embed.setThumbnail("https://cdn.discordapp.com/attachments/692865174583115776/761149853366484992/VB1.png")
-        embed.setDescription("You have successfully removed your banner.")
-        message.channel.send(embed)
-
-    }
-
-
-    if (command === 'profile' && args[0][0] + args[0][1] != "<@") {
-        return;
-    }
-
-    else if (command === 'profile' && listausera.includes(user.id) == false) {
-
-        embed.setTitle(`${user.username}'s Profile`)
-        embed.setThumbnail(user.displayAvatarURL({ dynamic: true }))
-        embed.setDescription("**Discord Tag :** <@" + user.id + ">" + "\n **User ID :** `" + user.id + "`\n\n **This user has no information available. **")
-
-        embed.setColor("#2f9ffa")
-
-        message.channel.send(embed);
-
-
-    }
-
-    else if (command === 'profile' && listausera.includes(user.id) == true) {
-
-        async function kix() {
-            var kom = []
-
-            x = await Data.find({ userID: user.id })
-
-            embed.setTitle(`${user.username}'s Profile`)
-            embed.setDescription("**Discord Tag :** <@" + user.id + ">" + "\n **User ID :** " + user.id + " \n **Verified:** " + x[0].verifikacija)
-            embed.addField("__**Vouch Information**__", "**Positive : **`" + x[0].pozitivni_vouch + "`\n **Negative : **`" + x[0].negativni_vouch + "`\n **Total : **`" + (x[0].negativni_vouch + x[0].pozitivni_vouch + "`"))
-            embed.setThumbnail(user.displayAvatarURL({ dynamic: true }))
-            embed.setColor("#2f9ffa")
-            embed.setImage(x[0].baner)
-
-            for (var i = x[0].komentari.length - 1; i >= 0; i--) {
-                if (x[0].komentari[i] != ":white_check_mark:" && x[0].komentari[i] != ":x:") {
-                    kom.push(x[0].komentari[i])
+                if (lastComments.length > 0) {
+                    profileEmbed.addField("__**Last 5 Comments**__", lastComments.join("\n"));
+                } else {
+                    profileEmbed.addField("__**Last 5 Comments**__", "No comments available yet.");
                 }
 
-            }
-            if (kom.length < 5) {
-                embed.addField("**Last 5 comments**", "User hasn't reached 5 comments yet.")
-            }
-            else {
-
-                embed.addField("__**Last 5 comments**__", "\n**1. " + " " + kom[0] + "**" + "\n**2." + " " + kom[1] + "**" + "\n**3. " + " " + kom[2] + "**" + "\n**4. " + " " + kom[3] + "**" + "\n**5. " + " " + kom[4] + "**");
-
-            }
-            console.log(kom)
-            message.channel.send(embed)
-        }
-        kix();
+                message.channel.send(profileEmbed);
+            })
+            .catch((err) => console.log(err));
     }
-
 });
 
 client.login(token);
