@@ -7,4 +7,9 @@ Discord bot that records credibility of user:
 - custom banner for premium users
 
 
+## DEMO
+
+
+
+https://github.com/user-attachments/assets/6e0a889b-ba1a-42e2-97cc-c6444be5c39d
 
