@@ -69,14 +69,15 @@ client.on('message', (message) => {
             message.channel.send(selfVouchEmbed);
             return;
         }
-
+    
         const isPositive = command === 'p';
         const vouchSymbol = isPositive ? ":white_check_mark:" : ":x:";
         const vouchType = isPositive ? "Positive" : "Negative";
-
-        const commentText = args.slice(1).join(" ");
-        comment = commentText;
-
+    
+        // Combine arguments for the comment, but remove the first argument (the mentioned user)
+        const commentText = args.slice(1).join(" ").trim();
+        const fullComment = commentText ? `${commentText} ${vouchSymbol}` : "";
+    
         if (!userList.includes(mentionedUser.id)) {
             const newUser = new Data({
                 name: client.users.cache.get(mentionedUser.id).username,
@@ -84,12 +85,12 @@ client.on('message', (message) => {
                 pozitivni_vouch: isPositive ? 1 : 0,
                 negativni_vouch: isPositive ? 0 : 1,
                 postoji: exists,
-                komentari: comment + vouchSymbol,
+                komentari: fullComment ? [fullComment] : [],
                 verifikacija: ":x:",
             });
-
+    
             newUser.save().catch((err) => console.log(err));
-
+    
             positiveVouchEmbed
                 .setTitle("Vouch Bot")
                 .setDescription(`You have successfully left a ${vouchType.toLowerCase()} vouch for <@${mentionedUser.id}>.\n\n**To view their profile, type:** \n\`+profile <@${mentionedUser.id}>\``)
@@ -98,8 +99,9 @@ client.on('message', (message) => {
             message.channel.send(positiveVouchEmbed);
         } else {
             const updateField = isPositive ? "pozitivni_vouch" : "negativni_vouch";
-            const updateComment = { $push: { komentari: comment + vouchSymbol } };
-
+            const updateComment = fullComment ? { $push: { komentari: fullComment } } : {};
+    
+            // Update the database entry
             Data.findOneAndUpdate({ userID: mentionedUser.id }, { $inc: { [updateField]: 1 }, ...updateComment }, { new: true })
                 .then(() => {
                     positiveVouchEmbed
@@ -111,13 +113,42 @@ client.on('message', (message) => {
                 })
                 .catch((err) => console.log(err));
         }
-
-        comment = "";
     }
+
+    if (command === "banner" && args.length == 1) {
+        async function baner() {
+            await Data.updateOne(
+                {userID: message.author.id}, 
+                {baner: args[0] },
+            )}
+        baner();
+        const embed = new Discord.MessageEmbed()
+        embed.setTitle("Vouch bot")
+        embed.setColor("#2f9ffa")
+        embed.setThumbnail("https://cdn.discordapp.com/attachments/692865174583115776/761149853366484992/VB1.png")
+        embed.setDescription("You have successfully placed banner for your profile. If it isn't showing , your link wasn't good.")
+        message.channel.send(embed)
+    }
+    
+    if(command === "removebanner")
+    {
+        
+        async function rb(){
+        await Data.updateOne({userID:message.author.id},{$unset: {baner:" "} })
+        }
+        rb()
+        const embed = new Discord.MessageEmbed()
+        embed.setTitle("Vouch bot")
+        embed.setColor("#2f9ffa")
+        embed.setThumbnail("https://cdn.discordapp.com/attachments/692865174583115776/761149853366484992/VB1.png")
+        embed.setDescription("You have successfully removed your banner.")
+        message.channel.send(embed)
+    }
+    
 
     if (command === "profile") {
         if (!mentionedUser) return;
-
+    
         if (!userList.includes(mentionedUser.id)) {
             const noInfoEmbed = new Discord.MessageEmbed()
                 .setTitle(`${mentionedUser.username}'s Profile`)
@@ -127,28 +158,44 @@ client.on('message', (message) => {
             message.channel.send(noInfoEmbed);
             return;
         }
-
+    
         Data.findOne({ userID: mentionedUser.id })
             .then((data) => {
-                const lastComments = data.komentari.slice(-5);
+                if (!data) {
+                    // Handle case where no data exists for the user
+                    const noDataEmbed = new Discord.MessageEmbed()
+                        .setTitle(`${mentionedUser.username}'s Profile`)
+                        .setThumbnail(mentionedUser.displayAvatarURL({ dynamic: true }))
+                        .setDescription(`**Discord Tag:** <@${mentionedUser.id}>\n**User ID:** ${mentionedUser.id}\n\n**No profile information found.**`)
+                        .setColor("#2f9ffa");
+                    message.channel.send(noDataEmbed);
+                    return;
+                }
+    
+                // Safely extract comments and default to an empty array
+                const lastComments = Array.isArray(data.komentari) ? data.komentari.slice(-5) : [];
+    
                 const profileEmbed = new Discord.MessageEmbed()
                     .setTitle(`${mentionedUser.username}'s Profile`)
-                    .setDescription(`**Discord Tag:** <@${mentionedUser.id}>\n**User ID:** ${mentionedUser.id}\n**Verified:** ${data.verifikacija}`)
-                    .addField("__**Vouch Information**__", `**Positive:** \`${data.pozitivni_vouch}\`\n**Negative:** \`${data.negativni_vouch}\`\n**Total:** \`${data.pozitivni_vouch + data.negativni_vouch}\``)
+                    .setDescription(`**Discord Tag:** <@${mentionedUser.id}>\n**User ID:** ${mentionedUser.id}\n**Verified:** ${data.verifikacija || ":x:"}`)
+                    .addField("__**Vouch Information**__", `**Positive:** \`${data.pozitivni_vouch || 0}\`\n**Negative:** \`${data.negativni_vouch || 0}\`\n**Total:** \`${(data.pozitivni_vouch || 0) + (data.negativni_vouch || 0)}\``)
                     .setThumbnail(mentionedUser.displayAvatarURL({ dynamic: true }))
-                    .setImage(data.baner)
+                    .setImage(data.baner || "")
                     .setColor("#2f9ffa");
-
+    
                 if (lastComments.length > 0) {
                     profileEmbed.addField("__**Last 5 Comments**__", lastComments.join("\n"));
                 } else {
                     profileEmbed.addField("__**Last 5 Comments**__", "No comments available yet.");
                 }
-
+    
                 message.channel.send(profileEmbed);
             })
-            .catch((err) => console.log(err));
+            .catch((err) => {
+                console.error("Error fetching user data:", err);
+            });
     }
+    
 });
 
 client.login(token);
